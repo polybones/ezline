@@ -4,9 +4,11 @@
 #include "../ezline.h"
 
 int main(int argc, char **argv) {
-  char *line;
-  while((line = ezline("> ")) != NULL) {
-    if(strcmp(line, "exit") == 0) break;
+  char *line = ezline("What is your name? ");
+  if(line == NULL) {
+    fprintf(stderr, "No username was provided!");
+    return 1;
   }
+  printf("Your name is: %s\n", line);
   return 0;
 }

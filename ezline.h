@@ -27,6 +27,7 @@
         distribution.
 
   TODO:
+    - code clean up
     - utf8 glyph struct(?)
     - arrow keys
     - backspace & delete keys
@@ -51,9 +52,8 @@
 
 typedef enum {
   EZLINE_STAT_OK = 0,
-#ifdef EZLINE_CTRL_C_ABORT
   EZLINE_STAT_ABORT,
-#endif
+  EZLINE_STAT_NO_INPUT,
 } Ezline_Status;
 
 typedef struct {
@@ -130,15 +130,12 @@ char *ezline(const char *prompt) {
       switch(c) {
         case('\r'):
           if(ez_state->offset == 0) {
-            slwrite("\r\n", 2);
-            return NULL;
+            ez_state->status = EZLINE_STAT_NO_INPUT;
           }
-          else {
-            goto done;
-          }
+          goto done;
         case(EZ_CTRL('c')):
 #ifdef EZLINE_CTRL_C_ABORT
-          slwrite("^C\r", 2);
+          slwrite("^C", 2);
           ez_state->status = EZLINE_STAT_ABORT;
           goto done;
 #else
@@ -185,6 +182,7 @@ char *ezline(const char *prompt) {
   done:
   if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_termios) == -1) return NULL;
   slwrite("\n", 1);
+  if(ez_state->status != EZLINE_STAT_OK) return NULL;
   return ez_state->buf;
 }
 

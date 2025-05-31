@@ -5,12 +5,8 @@
 #include "../ezline.h"
 
 int main(int argc, char **argv) {
-  char *line;
-  do {
-    line = ezline("What is your name? ");
-  } while(line == NULL);
-
-  if(ezline_stat() == EZLINE_STAT_ABORT) {
+  char *line = ezline("What is your name? ");
+  if(line == NULL) {
     printf("Goodbye!\n");
     return 1;
   }

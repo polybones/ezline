@@ -36,6 +36,8 @@
 #ifndef EZLINE_H_
 #define EZLINE_H_
 
+#include <assert.h>
+#include <math.h>
 #include <poll.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -49,6 +51,10 @@
 #endif // EZLINE_MAX_BUF_LEN
 
 #define EZLINE_CHUNK_SIZE 256
+
+#ifndef EZLINE_MAX_CUR_SHIFT
+#define EZLINE_MAX_CUR_SHIFT 256
+#endif // EZLINE_MAX_CUR_SHIFT
 
 typedef enum {
   EZLINE_STAT_OK = 0,
@@ -87,6 +93,28 @@ int is_utf8_continuation(unsigned char c) {
   return (c & 0b11000000) == 0b10000000;
 }
 
+// TODO: add support for shifting up/down in rows if the cursor
+// exceeds the size of the terminal columns.
+// TODO (2): Implement a "builder" system for concatinating
+// actions (like clearing, moving cursor, etc.)
+// https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797
+void ez_cur_move(int amount) {
+  Ezline_State *ez_state = &ezline_state_glob;
+  assert(amount != 0);
+  int shift = abs(amount);
+  assert(shift <= EZLINE_MAX_CUR_SHIFT);
+
+  int size = floor(((sizeof(int) * shift) / 10)) + 5;
+  char buf[EZLINE_MAX_CUR_SHIFT];
+  if(amount > 0) {
+  }
+  else {
+    snprintf(buf, 5, "\x1B[%dD", shift);
+    ez_state->offset -= shift;
+  }
+  slwrite(buf, 5);
+}
+
 char *ezline(const char *prompt) {
   Ezline_State *ez_state = &ezline_state_glob;
 
@@ -114,6 +142,7 @@ char *ezline(const char *prompt) {
 
   repl: for(;;) {
     if(read_pos >= read_len) {
+      scan:
       struct pollfd ufds[1];
       ufds[0].fd = STDIN_FILENO;
       ufds[0].events = POLLIN;
@@ -128,6 +157,11 @@ char *ezline(const char *prompt) {
       unsigned char c = read_buf[read_pos];
 
       switch(c) {
+        case(127):
+          // slwrite("\x1B[5D", 4);
+          ez_cur_move(-1);
+          goto scan;
+          // break;
         case('\r'):
           if(ez_state->offset == 0) {
             ez_state->status = EZLINE_STAT_NO_INPUT;
@@ -151,6 +185,8 @@ char *ezline(const char *prompt) {
       }
 
       if(read_pos + expected_len > read_len) {
+        // if we have a utf8 character that exceeds the size of our buffer,
+        // we extend for more room.
         memmove(read_buf, read_buf + read_pos, read_len - read_pos);
         read_len -= read_pos;
         read_pos = 0;

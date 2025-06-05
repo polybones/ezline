@@ -25,12 +25,6 @@
     
         3. This notice may not be removed or altered from any source
         distribution.
-
-  TODO:
-    - code clean up
-    - utf8 glyph struct(?)
-    - arrow keys
-    - backspace & delete keys
 */
 
 #ifndef EZLINE_H_
@@ -52,13 +46,10 @@
 
 #define EZLINE_CHUNK_SIZE 256
 
-#ifndef EZLINE_MAX_CUR_SHIFT
-#define EZLINE_MAX_CUR_SHIFT 256
-#endif // EZLINE_MAX_CUR_SHIFT
-
 typedef enum {
   EZLINE_STAT_OK = 0,
   EZLINE_STAT_ABORT,
+  EZLINE_STAT_CANCEL,
   EZLINE_STAT_NO_INPUT,
 } Ezline_Status;
 
@@ -95,18 +86,20 @@ int is_utf8_continuation(unsigned char c) {
 
 // TODO: add support for shifting up/down in rows if the cursor
 // exceeds the size of the terminal columns.
-// TODO (2): Implement a "builder" system for concatinating
+// TODO(2): Implement a "builder" system for concatinating
 // actions (like clearing, moving cursor, etc.)
+// TODO(3): Do bounds checking for rows/cols.
 // https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797
 void ez_cur_move(int amount) {
   Ezline_State *ez_state = &ezline_state_glob;
   assert(amount != 0);
   int shift = abs(amount);
-  assert(shift <= EZLINE_MAX_CUR_SHIFT);
+  assert(shift <= 256);
 
   int size = floor(((sizeof(int) * shift) / 10)) + 5;
-  char buf[EZLINE_MAX_CUR_SHIFT];
+  char buf[256];
   if(amount > 0) {
+    // go right
   }
   else {
     snprintf(buf, 5, "\x1B[%dD", shift);
@@ -119,7 +112,10 @@ char *ezline(const char *prompt) {
   Ezline_State *ez_state = &ezline_state_glob;
 
   struct termios old_termios;
-  if(tcgetattr(STDIN_FILENO, &old_termios) == -1) return NULL;
+  if(tcgetattr(STDIN_FILENO, &old_termios) == -1) {
+    ez_state->status = EZLINE_STAT_ABORT;
+    goto done;
+  }
   
   struct termios raw = old_termios;
   raw.c_cflag |= (CS8);
@@ -129,7 +125,10 @@ char *ezline(const char *prompt) {
   raw.c_cc[VMIN] = 0;
   raw.c_cc[VTIME] = 1;
 
-  if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) return NULL;
+  if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
+    ez_state->status = EZLINE_STAT_CANCEL;
+    goto done;
+  }
   reprompt:
   memset(ez_state->buf, 0, sizeof(ez_state->buf));
   ez_state->offset = 0;
@@ -148,7 +147,10 @@ char *ezline(const char *prompt) {
       ufds[0].events = POLLIN;
       if(poll(ufds, 1, -1) == -1) return NULL;
 
-      if((read_len = read(STDIN_FILENO, read_buf, sizeof(read_buf))) == -1) return NULL;
+      if((read_len = read(STDIN_FILENO, read_buf, sizeof(read_buf))) == -1) {
+        ez_state->status = EZLINE_STAT_ABORT;
+        goto done;
+      }
       if(read_len == 0) continue;
       read_pos = 0;
     }
@@ -168,14 +170,9 @@ char *ezline(const char *prompt) {
           }
           goto done;
         case(EZ_CTRL('c')):
-#ifdef EZLINE_CTRL_C_ABORT
           slwrite("^C", 2);
-          ez_state->status = EZLINE_STAT_ABORT;
+          ez_state->status = EZLINE_STAT_CANCEL;
           goto done;
-#else
-          slwrite("^C\n\r", 4);
-          goto reprompt;
-#endif // EZLINE_CTRL_C_ABORT
       }
 
       int expected_len = utf8_byte_len(c);
@@ -216,9 +213,10 @@ char *ezline(const char *prompt) {
   }
 
   done:
-  if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_termios) == -1) return NULL;
+  if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &old_termios) == -1) {
+    ez_state->status = EZLINE_STAT_ABORT;
+  }
   slwrite("\n", 1);
-  if(ez_state->status != EZLINE_STAT_OK) return NULL;
   return ez_state->buf;
 }
 
